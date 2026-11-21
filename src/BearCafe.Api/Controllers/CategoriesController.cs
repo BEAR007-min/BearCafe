@@ -1,3 +1,4 @@
+
 using BearCafe.Application.Categories.DTOs;
 using BearCafe.Application.Categories.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -10,38 +11,66 @@ namespace BearCafe.Api.Controllers;
 public class CategoriesController : ControllerBase
 {
     private readonly ICategoryService _service;
-    public CategoriesController(ICategoryService service) => _service = service;
+
+    public CategoriesController(ICategoryService service)
+    {
+        _service = service;
+    }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<CategoryDto>>> GetAll() => Ok(await _service.GetAllAsync());
+    public async Task<ActionResult<IReadOnlyList<CategoryDto>>> GetAll()
+    {
+        return Ok(await _service.GetAllAsync());
+    }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<CategoryDto>> GetById(int id)
     {
         var item = await _service.GetByIdAsync(id);
-        return item is null ? NotFound(new { message = "Không tìm thấy danh mục." }) : Ok(item);
+
+        if (item == null)
+            return NotFound(new { message = "Không tìm thấy danh mục." });
+
+        return Ok(item);
     }
 
     [HttpPost]
-    public async Task<ActionResult<CategoryDto>> Create(CategoryDto dto)
+    public async Task<ActionResult<CategoryDto>> Create(
+        [FromBody] CategoryDto categoryDto)
     {
         try
         {
-            var created = await _service.CreateAsync(dto);
-            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+            var created = await _service.CreateAsync(categoryDto);
+
+            return CreatedAtAction(
+                nameof(GetById),
+                new { id = created.Id },
+                created);
         }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, CategoryDto dto)
+    public async Task<IActionResult> Update(
+        int id,
+        [FromBody] CategoryDto categoryDto)
     {
         try
         {
-            var updated = await _service.UpdateAsync(id, dto);
-            return updated ? NoContent() : NotFound(new { message = "Không tìm thấy danh mục." });
+            var updated = await _service.UpdateAsync(id, categoryDto);
+
+            if (!updated)
+                return NotFound(new { message = "Không tìm thấy danh mục." });
+
+            return NoContent();
         }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id:int}")]
@@ -50,8 +79,18 @@ public class CategoriesController : ControllerBase
         try
         {
             var deleted = await _service.DeleteAsync(id);
-            return deleted ? NoContent() : NotFound(new { message = "Không tìm thấy danh mục." });
+
+            if (!deleted)
+                return NotFound(new { message = "Không tìm thấy danh mục." });
+
+            return NoContent();
         }
-        catch (DbUpdateException) { return Conflict(new { message = "Không thể xóa danh mục đang được sản phẩm sử dụng." }); }
+        catch (DbUpdateException)
+        {
+            return Conflict(new
+            {
+                message = "Không thể xóa danh mục đang được sản phẩm sử dụng."
+            });
+        }
     }
 }
