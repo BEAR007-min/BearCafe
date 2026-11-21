@@ -1,5 +1,5 @@
-
 import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 import { api } from './api';
 import type { Category, Order, Product } from './types';
 
@@ -58,7 +58,6 @@ function buildRevenueSeries(
       const amount = paidOrders
         .filter(order => {
           const orderDate = new Date(order.createdAt);
-
           return (
             orderDate.getFullYear() === date.getFullYear() &&
             orderDate.getMonth() === date.getMonth()
@@ -81,14 +80,11 @@ function buildRevenueSeries(
   return Array.from({ length: dayCount }, (_, index) => {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
-    date.setDate(
-      date.getDate() - (dayCount - 1 - index)
-    );
+    date.setDate(date.getDate() - (dayCount - 1 - index));
 
     const amount = paidOrders
       .filter(order => {
         const orderDate = new Date(order.createdAt);
-
         return (
           orderDate.getFullYear() === date.getFullYear() &&
           orderDate.getMonth() === date.getMonth() &&
@@ -120,26 +116,37 @@ export default function App() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   const [revenuePeriod, setRevenuePeriod] =
     useState<RevenuePeriod>('7d');
 
+  // Product form and filters
   const [productForm, setProductForm] = useState(emptyProduct);
   const [editingProductId, setEditingProductId] =
     useState<number | null>(null);
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] =
+    useState('all');
+  const [productAvailabilityFilter, setProductAvailabilityFilter] =
+    useState('all');
+  const [productSortBy, setProductSortBy] = useState('nameAsc');
+  const [productPage, setProductPage] = useState(1);
+  const [productPageSize, setProductPageSize] = useState(5);
 
+  // Category form and filters
   const [categoryForm, setCategoryForm] =
     useState(emptyCategory);
-
   const [editingCategoryId, setEditingCategoryId] =
     useState<number | null>(null);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [categoryStatusFilter, setCategoryStatusFilter] =
+    useState('all');
 
+  // Order cart
   const [cartProductId, setCartProductId] = useState('');
   const [cartQuantity, setCartQuantity] = useState('1');
-
   const [cart, setCart] = useState<
     { productId: number; quantity: number }[]
   >([]);
@@ -153,20 +160,18 @@ export default function App() {
     setError('');
 
     try {
-      const [p, c, o] = await Promise.all([
+      const [productData, categoryData, orderData] = await Promise.all([
         api.products.list(),
         api.categories.list(),
         api.orders.list(),
       ]);
 
-      setProducts(p);
-      setCategories(c);
-      setOrders(o);
+      setProducts(productData);
+      setCategories(categoryData);
+      setOrders(orderData);
     } catch (e) {
       setError(
-        e instanceof Error
-          ? e.message
-          : 'Không thể tải dữ liệu.'
+        e instanceof Error ? e.message : 'Không thể tải dữ liệu.'
       );
     } finally {
       setLoading(false);
@@ -185,10 +190,7 @@ export default function App() {
     () =>
       orders
         .filter(order => order.paymentStatus === 'Paid')
-        .reduce(
-          (sum, order) => sum + order.totalAmount,
-          0
-        ),
+        .reduce((sum, order) => sum + order.totalAmount, 0),
     [orders]
   );
 
@@ -198,8 +200,91 @@ export default function App() {
   );
 
   const categoryName = (id: number) =>
-    categories.find(category => category.id === id)?.name ||
+    categories.find(category => category.id === id)?.name ??
     `Danh mục #${id}`;
+
+  // Product filtering
+  const filteredProducts = useMemo(() => {
+    const keyword = productSearch.trim().toLocaleLowerCase();
+
+    return products.filter(product => {
+      const matchesSearch =
+        !keyword || product.name.toLocaleLowerCase().includes(keyword);
+
+      const matchesCategory =
+        productCategoryFilter === 'all' ||
+        product.categoryId === Number(productCategoryFilter);
+
+      const matchesAvailability =
+        productAvailabilityFilter === 'all' ||
+        (productAvailabilityFilter === 'available'
+          ? product.isAvailable
+          : !product.isAvailable);
+
+      return matchesSearch && matchesCategory && matchesAvailability;
+    });
+  }, [
+    products,
+    productSearch,
+    productCategoryFilter,
+    productAvailabilityFilter,
+  ]);
+
+  const sortedProducts = useMemo(() => {
+    return [...filteredProducts].sort((a, b) => {
+      switch (productSortBy) {
+        case 'nameDesc':
+          return b.name.localeCompare(a.name, 'vi');
+        case 'priceLow':
+          return a.price - b.price;
+        case 'priceHigh':
+          return b.price - a.price;
+        default:
+          return a.name.localeCompare(b.name, 'vi');
+      }
+    });
+  }, [filteredProducts, productSortBy]);
+
+  const totalProductPages = Math.max(
+    1,
+    Math.ceil(sortedProducts.length / productPageSize)
+  );
+  const currentProductPage = Math.min(productPage, totalProductPages);
+  const paginatedProducts = sortedProducts.slice(
+    (currentProductPage - 1) * productPageSize,
+    currentProductPage * productPageSize
+  );
+
+  useEffect(() => {
+    setProductPage(1);
+  }, [
+    productSearch,
+    productCategoryFilter,
+    productAvailabilityFilter,
+    productSortBy,
+    productPageSize,
+  ]);
+
+  // Category filtering
+  const filteredCategories = useMemo(() => {
+    const keyword = categorySearch.trim().toLocaleLowerCase();
+
+    return categories.filter(category => {
+      const name = category.name.toLocaleLowerCase();
+      const description = (category.description ?? '').toLocaleLowerCase();
+
+      const matchesSearch =
+        !keyword || name.includes(keyword) || description.includes(keyword);
+
+      const matchesStatus =
+        categoryStatusFilter === 'all' ||
+        (categoryStatusFilter === 'active'
+          ? category.isActive
+          : !category.isActive);
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [categories, categorySearch, categoryStatusFilter]);
 
   // =============================================
   // COMMON ACTION
@@ -207,7 +292,7 @@ export default function App() {
 
   async function runAction(
     action: () => Promise<unknown>,
-    success: string
+    successMessage: string
   ) {
     setBusy(true);
     setError('');
@@ -215,13 +300,11 @@ export default function App() {
 
     try {
       await action();
-      setNotice(success);
+      setNotice(successMessage);
       await loadAll();
     } catch (e) {
       setError(
-        e instanceof Error
-          ? e.message
-          : 'Có lỗi xảy ra.'
+        e instanceof Error ? e.message : 'Có lỗi xảy ra.'
       );
     } finally {
       setBusy(false);
@@ -237,9 +320,7 @@ export default function App() {
     setEditingProductId(null);
   }
 
-  async function saveProduct(
-    e: React.FormEvent<HTMLFormElement>
-  ) {
+  async function saveProduct(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const payload = {
@@ -253,10 +334,7 @@ export default function App() {
 
     await runAction(async () => {
       if (editingProductId !== null) {
-        await api.products.update(
-          editingProductId,
-          payload
-        );
+        await api.products.update(editingProductId, payload);
       } else {
         await api.products.create(payload);
       }
@@ -269,7 +347,6 @@ export default function App() {
 
   function editProduct(product: Product) {
     setEditingProductId(product.id);
-
     setProductForm({
       name: product.name,
       description: product.description || '',
@@ -278,17 +355,14 @@ export default function App() {
       categoryId: String(product.categoryId),
       isAvailable: product.isAvailable,
     });
-
     setTab('products');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function deleteProduct(id: number) {
-    if (
-      !confirm(
-        'Bạn chắc chắn muốn xóa sản phẩm này? Sản phẩm đã nằm trong đơn hàng có thể không xóa được.'
-      )
-    ) {
+    if (!window.confirm(
+      'Bạn chắc chắn muốn xóa sản phẩm này? Sản phẩm đã nằm trong đơn hàng có thể không xóa được.'
+    )) {
       return;
     }
 
@@ -302,9 +376,7 @@ export default function App() {
   // CATEGORIES
   // =============================================
 
-  async function saveCategory(
-    e: React.FormEvent<HTMLFormElement>
-  ) {
+  async function saveCategory(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const payload = {
@@ -315,10 +387,7 @@ export default function App() {
 
     await runAction(async () => {
       if (editingCategoryId !== null) {
-        await api.categories.update(
-          editingCategoryId,
-          payload
-        );
+        await api.categories.update(editingCategoryId, payload);
       } else {
         await api.categories.create(payload);
       }
@@ -332,14 +401,13 @@ export default function App() {
 
   function editCategory(category: Category) {
     setEditingCategoryId(category.id);
-
     setCategoryForm({
       name: category.name,
       description: category.description || '',
       isActive: category.isActive,
     });
-
     setTab('categories');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function resetCategory() {
@@ -348,11 +416,9 @@ export default function App() {
   }
 
   async function deleteCategory(id: number) {
-    if (
-      !confirm(
-        'Chỉ xóa danh mục khi không còn sản phẩm sử dụng danh mục này. Tiếp tục?'
-      )
-    ) {
+    if (!window.confirm(
+      'Chỉ xóa danh mục khi không còn sản phẩm sử dụng danh mục này. Tiếp tục?'
+    )) {
       return;
     }
 
@@ -381,17 +447,12 @@ export default function App() {
     }
 
     setCart(current => {
-      const found = current.find(
-        item => item.productId === productId
-      );
+      const existing = current.find(item => item.productId === productId);
 
-      if (found) {
+      if (existing) {
         return current.map(item =>
           item.productId === productId
-            ? {
-                ...item,
-                quantity: item.quantity + quantity,
-              }
+            ? { ...item, quantity: item.quantity + quantity }
             : item
         );
       }
@@ -414,9 +475,9 @@ export default function App() {
         customerId: null,
         items: cart,
       });
-
       setCart([]);
       setCartProductId('');
+      setCartQuantity('1');
     }, 'Đã tạo đơn hàng thành công.');
   }
 
@@ -426,21 +487,13 @@ export default function App() {
     paymentStatus: string
   ) {
     await runAction(
-      () =>
-        api.orders.updateStatus(
-          order.id,
-          status,
-          paymentStatus
-        ),
+      () => api.orders.updateStatus(order.id, status, paymentStatus),
       `Đã cập nhật đơn hàng #${order.id}.`
     );
   }
 
   const cartTotal = cart.reduce((sum, item) => {
-    const product = products.find(
-      p => p.id === item.productId
-    );
-
+    const product = products.find(p => p.id === item.productId);
     return sum + (product?.price || 0) * item.quantity;
   }, 0);
 
@@ -453,7 +506,6 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">B</div>
-
           <div>
             <strong>BearCafe</strong>
             <small>QUẢN LÝ QUÁN CÀ PHÊ</small>
@@ -468,20 +520,16 @@ export default function App() {
             ['products', '☕', 'Sản phẩm'],
             ['categories', '▦', 'Danh mục'],
             ['orders', '▤', 'Đơn hàng'],
-          ] as [Tab, string, string][]).map(
-            ([key, icon, label]) => (
-              <button
-                key={key}
-                className={`nav-item ${
-                  tab === key ? 'active' : ''
-                }`}
-                onClick={() => setTab(key)}
-              >
-                <span>{icon}</span>
-                {label}
-              </button>
-            )
-          )}
+          ] as [Tab, string, string][]).map(([key, icon, label]) => (
+            <button
+              key={key}
+              className={`nav-item ${tab === key ? 'active' : ''}`}
+              onClick={() => setTab(key)}
+            >
+              <span>{icon}</span>
+              {label}
+            </button>
+          ))}
         </nav>
 
         <div className="sidebar-bottom">
@@ -494,10 +542,7 @@ export default function App() {
       <main className="main-area">
         <header className="topbar">
           <div>
-            <span className="eyebrow">
-              BEARCAFE / MANAGEMENT
-            </span>
-
+            <span className="eyebrow">BEARCAFE / MANAGEMENT</span>
             <h1>
               {{
                 overview: 'Tổng quan',
@@ -518,40 +563,24 @@ export default function App() {
         </header>
 
         <section className="content">
-          {error && (
-            <div className="alert error">{error}</div>
-          )}
-
-          {notice && (
-            <div className="alert success">{notice}</div>
-          )}
+          {error && <div className="alert error">{error}</div>}
+          {notice && <div className="alert success">{notice}</div>}
 
           {loading ? (
-            <div className="empty">
-              Đang tải dữ liệu từ BearCafe API...
-            </div>
+            <div className="empty">Đang tải dữ liệu từ BearCafe API...</div>
           ) : (
             <>
-              {/* =================================
-                  DASHBOARD
-              ================================= */}
-
+              {/* DASHBOARD */}
               {tab === 'overview' && (
                 <>
                   <div className="welcome">
                     <div>
-                      <span className="eyebrow light">
-                        HỆ THỐNG QUẢN LÝ
-                      </span>
-
+                      <span className="eyebrow light">HỆ THỐNG QUẢN LÝ</span>
                       <h2>Chào mừng đến với BearCafe</h2>
-
                       <p>
-                        Theo dõi sản phẩm, danh mục và hoạt
-                        động đơn hàng tại một nơi.
+                        Theo dõi sản phẩm, danh mục và hoạt động đơn hàng tại một nơi.
                       </p>
                     </div>
-
                     <div className="coffee-art">☕</div>
                   </div>
 
@@ -562,21 +591,18 @@ export default function App() {
                       note="Tổng sản phẩm"
                       icon="☕"
                     />
-
                     <Stat
                       label="Danh mục"
                       value={categories.length}
                       note="Tổng danh mục"
                       icon="▦"
                     />
-
                     <Stat
                       label="Đơn hàng"
                       value={orders.length}
                       note="Tổng đơn đã ghi nhận"
                       icon="▤"
                     />
-
                     <Stat
                       label="Doanh thu đã thanh toán"
                       value={money(revenue)}
@@ -591,7 +617,6 @@ export default function App() {
                       period={revenuePeriod}
                       onPeriodChange={setRevenuePeriod}
                     />
-
                     <OrderStatusPanel orders={orders} />
                   </div>
 
@@ -599,11 +624,8 @@ export default function App() {
                     <div className="panel-heading">
                       <div>
                         <h3>Đơn hàng gần đây</h3>
-                        <p>
-                          Các giao dịch mới nhất trong hệ thống
-                        </p>
+                        <p>Các giao dịch mới nhất trong hệ thống</p>
                       </div>
-
                       <button
                         className="text-button"
                         onClick={() => setTab('orders')}
@@ -611,7 +633,6 @@ export default function App() {
                         Xem tất cả →
                       </button>
                     </div>
-
                     <OrderTable
                       orders={orders.slice(0, 5)}
                       onUpdate={updateOrder}
@@ -620,10 +641,7 @@ export default function App() {
                 </>
               )}
 
-              {/* =================================
-                  PRODUCTS
-              ================================= */}
-
+              {/* PRODUCTS */}
               {tab === 'products' && (
                 <div className="two-column">
                   <div className="panel form-panel">
@@ -634,20 +652,13 @@ export default function App() {
                             ? 'Cập nhật sản phẩm'
                             : 'Thêm sản phẩm mới'}
                         </h3>
-
-                        <p>
-                          Thông tin sản phẩm bán tại quán
-                        </p>
+                        <p>Thông tin sản phẩm bán tại quán</p>
                       </div>
                     </div>
 
-                    <form
-                      onSubmit={saveProduct}
-                      className="form-grid"
-                    >
+                    <form onSubmit={saveProduct} className="form-grid">
                       <label className="full">
                         Tên sản phẩm
-
                         <input
                           required
                           maxLength={150}
@@ -664,7 +675,6 @@ export default function App() {
 
                       <label>
                         Giá bán (VNĐ)
-
                         <input
                           required
                           type="number"
@@ -682,7 +692,6 @@ export default function App() {
 
                       <label>
                         Danh mục
-
                         <select
                           required
                           value={productForm.categoryId}
@@ -694,14 +703,10 @@ export default function App() {
                           }
                         >
                           <option value="">Chọn danh mục</option>
-
                           {categories
                             .filter(category => category.isActive)
                             .map(category => (
-                              <option
-                                key={category.id}
-                                value={category.id}
-                              >
+                              <option key={category.id} value={category.id}>
                                 {category.name}
                               </option>
                             ))}
@@ -710,7 +715,6 @@ export default function App() {
 
                       <label className="full">
                         Mô tả
-
                         <textarea
                           rows={3}
                           maxLength={1000}
@@ -726,7 +730,6 @@ export default function App() {
 
                       <label className="full">
                         Đường dẫn hình ảnh
-
                         <input
                           value={productForm.imageUrl}
                           onChange={e =>
@@ -750,7 +753,6 @@ export default function App() {
                             })
                           }
                         />
-
                         Đang kinh doanh
                       </label>
 
@@ -763,7 +765,6 @@ export default function App() {
                             ? 'Lưu thay đổi'
                             : 'Thêm sản phẩm'}
                         </button>
-
                         {editingProductId !== null && (
                           <button
                             type="button"
@@ -781,10 +782,82 @@ export default function App() {
                     <div className="panel-heading">
                       <div>
                         <h3>Danh sách sản phẩm</h3>
-                        <p>
-                          {products.length} sản phẩm trong hệ thống
-                        </p>
+                        <p>{products.length} sản phẩm trong hệ thống</p>
                       </div>
+                    </div>
+
+                    <div className="product-filters">
+                      <input
+                        type="search"
+                        placeholder="Tìm kiếm theo tên sản phẩm..."
+                        value={productSearch}
+                        onChange={e => setProductSearch(e.target.value)}
+                      />
+
+                      <select
+                        value={productSortBy}
+                        onChange={e => setProductSortBy(e.target.value)}
+                        aria-label="Sắp xếp sản phẩm"
+                      >
+                        <option value="nameAsc">Tên A - Z</option>
+                        <option value="nameDesc">Tên Z - A</option>
+                        <option value="priceLow">Giá thấp đến cao</option>
+                        <option value="priceHigh">Giá cao đến thấp</option>
+                      </select>
+
+                      <select
+                        value={productPageSize}
+                        onChange={e => setProductPageSize(Number(e.target.value))}
+                        aria-label="Số sản phẩm mỗi trang"
+                      >
+                        <option value={5}>5 sản phẩm / trang</option>
+                        <option value={10}>10 sản phẩm / trang</option>
+                        <option value={20}>20 sản phẩm / trang</option>
+                      </select>
+
+                      <select
+                        value={productCategoryFilter}
+                        onChange={e => setProductCategoryFilter(e.target.value)}
+                        aria-label="Lọc theo danh mục"
+                      >
+                        <option value="all">Tất cả danh mục</option>
+                        {categories.map(category => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={productAvailabilityFilter}
+                        onChange={e =>
+                          setProductAvailabilityFilter(e.target.value)
+                        }
+                        aria-label="Lọc trạng thái sản phẩm"
+                      >
+                        <option value="all">Tất cả trạng thái</option>
+                        <option value="available">Đang kinh doanh</option>
+                        <option value="unavailable">Tạm ngưng</option>
+                      </select>
+
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => {
+                          setProductSearch('');
+                          setProductCategoryFilter('all');
+                          setProductAvailabilityFilter('all');
+                          setProductSortBy('nameAsc');
+                          setProductPageSize(5);
+                          setProductPage(1);
+                        }}
+                      >
+                        Xóa bộ lọc
+                      </button>
+
+                      <span className="filter-result">
+                        {filteredProducts.length}/{products.length} sản phẩm
+                      </span>
                     </div>
 
                     <div className="table-wrap">
@@ -798,74 +871,77 @@ export default function App() {
                             <th></th>
                           </tr>
                         </thead>
-
                         <tbody>
-                          {products.map(product => (
+                          {paginatedProducts.map(product => (
                             <tr key={product.id}>
                               <td>
                                 <strong>{product.name}</strong>
-                                <small className="subline">
-                                  #{product.id}
-                                </small>
+                                <small className="subline">#{product.id}</small>
                               </td>
-
-                              <td>
-                                {categoryName(product.categoryId)}
-                              </td>
-
-                              <td className="price">
-                                {money(product.price)}
-                              </td>
-
+                              <td>{categoryName(product.categoryId)}</td>
+                              <td className="price">{money(product.price)}</td>
                               <td>
                                 <span
                                   className={`pill ${
-                                    product.isAvailable
-                                      ? 'green'
-                                      : 'gray'
+                                    product.isAvailable ? 'green' : 'gray'
                                   }`}
                                 >
-                                  {product.isAvailable
-                                    ? 'Đang bán'
-                                    : 'Tạm ngưng'}
+                                  {product.isAvailable ? 'Đang bán' : 'Tạm ngưng'}
                                 </span>
                               </td>
-
                               <td className="actions">
-                                <button
-                                  onClick={() =>
-                                    editProduct(product)
-                                  }
-                                >
+                                <button onClick={() => editProduct(product)}>
                                   Sửa
                                 </button>
-
                                 <button
                                   className="danger-link"
-                                  onClick={() =>
-                                    void deleteProduct(product.id)
-                                  }
+                                  onClick={() => void deleteProduct(product.id)}
                                 >
                                   Xóa
                                 </button>
                               </td>
                             </tr>
                           ))}
-
-                          {!products.length && (
-                            <EmptyRow colSpan={5} />
+                          {!paginatedProducts.length && (
+                            <EmptyRow
+                              colSpan={5}
+                              text="Không tìm thấy sản phẩm phù hợp."
+                            />
                           )}
                         </tbody>
                       </table>
+                    </div>
+
+                    <div className="pagination">
+                      <span>
+                        Trang {currentProductPage}/{totalProductPages}
+                        {' · '}
+                        {filteredProducts.length} sản phẩm
+                      </span>
+                      <div className="pagination-actions">
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={currentProductPage === 1}
+                          onClick={() => setProductPage(currentProductPage - 1)}
+                        >
+                          ← Trước
+                        </button>
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={currentProductPage === totalProductPages}
+                          onClick={() => setProductPage(currentProductPage + 1)}
+                        >
+                          Sau →
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* =================================
-                  CATEGORIES
-              ================================= */}
-
+              {/* CATEGORIES */}
               {tab === 'categories' && (
                 <div className="two-column category-layout">
                   <div className="panel form-panel">
@@ -876,18 +952,13 @@ export default function App() {
                             ? 'Cập nhật danh mục'
                             : 'Thêm danh mục'}
                         </h3>
-
                         <p>Phân loại sản phẩm của quán</p>
                       </div>
                     </div>
 
-                    <form
-                      onSubmit={saveCategory}
-                      className="form-grid"
-                    >
+                    <form onSubmit={saveCategory} className="form-grid">
                       <label className="full">
                         Tên danh mục
-
                         <input
                           required
                           maxLength={100}
@@ -904,7 +975,6 @@ export default function App() {
 
                       <label className="full">
                         Mô tả
-
                         <textarea
                           rows={4}
                           maxLength={500}
@@ -929,20 +999,15 @@ export default function App() {
                             })
                           }
                         />
-
                         Danh mục đang hoạt động
                       </label>
 
                       <div className="form-actions full">
-                        <button
-                          className="button primary"
-                          disabled={busy}
-                        >
+                        <button className="button primary" disabled={busy}>
                           {editingCategoryId !== null
                             ? 'Lưu thay đổi'
                             : 'Thêm danh mục'}
                         </button>
-
                         {editingCategoryId !== null && (
                           <button
                             type="button"
@@ -960,10 +1025,42 @@ export default function App() {
                     <div className="panel-heading">
                       <div>
                         <h3>Danh mục hiện có</h3>
-                        <p>
-                          {categories.length} danh mục trong hệ thống
-                        </p>
+                        <p>{categories.length} danh mục trong hệ thống</p>
                       </div>
+                    </div>
+
+                    <div className="category-filters">
+                      <input
+                        type="search"
+                        placeholder="Tìm theo tên hoặc mô tả danh mục..."
+                        value={categorySearch}
+                        onChange={e => setCategorySearch(e.target.value)}
+                      />
+
+                      <select
+                        value={categoryStatusFilter}
+                        onChange={e => setCategoryStatusFilter(e.target.value)}
+                        aria-label="Lọc trạng thái danh mục"
+                      >
+                        <option value="all">Tất cả trạng thái</option>
+                        <option value="active">Đang hoạt động</option>
+                        <option value="inactive">Tạm dừng</option>
+                      </select>
+
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => {
+                          setCategorySearch('');
+                          setCategoryStatusFilter('all');
+                        }}
+                      >
+                        Xóa bộ lọc
+                      </button>
+
+                      <span className="filter-result">
+                        {filteredCategories.length}/{categories.length} danh mục
+                      </span>
                     </div>
 
                     <div className="table-wrap">
@@ -976,56 +1073,41 @@ export default function App() {
                             <th></th>
                           </tr>
                         </thead>
-
                         <tbody>
-                          {categories.map(category => (
+                          {filteredCategories.map(category => (
                             <tr key={category.id}>
                               <td>
                                 <strong>{category.name}</strong>
-                                <small className="subline">
-                                  #{category.id}
-                                </small>
+                                <small className="subline">#{category.id}</small>
                               </td>
-
                               <td>{category.description || '—'}</td>
-
                               <td>
                                 <span
                                   className={`pill ${
-                                    category.isActive
-                                      ? 'green'
-                                      : 'gray'
+                                    category.isActive ? 'green' : 'gray'
                                   }`}
                                 >
-                                  {category.isActive
-                                    ? 'Hoạt động'
-                                    : 'Tạm dừng'}
+                                  {category.isActive ? 'Hoạt động' : 'Tạm dừng'}
                                 </span>
                               </td>
-
                               <td className="actions">
-                                <button
-                                  onClick={() =>
-                                    editCategory(category)
-                                  }
-                                >
+                                <button onClick={() => editCategory(category)}>
                                   Sửa
                                 </button>
-
                                 <button
                                   className="danger-link"
-                                  onClick={() =>
-                                    void deleteCategory(category.id)
-                                  }
+                                  onClick={() => void deleteCategory(category.id)}
                                 >
                                   Xóa
                                 </button>
                               </td>
                             </tr>
                           ))}
-
-                          {!categories.length && (
-                            <EmptyRow colSpan={4} />
+                          {!filteredCategories.length && (
+                            <EmptyRow
+                              colSpan={4}
+                              text="Không tìm thấy danh mục phù hợp."
+                            />
                           )}
                         </tbody>
                       </table>
@@ -1034,10 +1116,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* =================================
-                  ORDERS
-              ================================= */}
-
+              {/* ORDERS */}
               {tab === 'orders' && (
                 <div className="orders-layout">
                   <div className="panel">
@@ -1045,8 +1124,7 @@ export default function App() {
                       <div>
                         <h3>Tạo đơn hàng</h3>
                         <p>
-                          Chọn sản phẩm và số lượng. Backend tự lấy giá
-                          từ cơ sở dữ liệu.
+                          Chọn sản phẩm và số lượng. Backend tự lấy giá từ cơ sở dữ liệu.
                         </p>
                       </div>
                     </div>
@@ -1054,22 +1132,15 @@ export default function App() {
                     <div className="cart-controls">
                       <label>
                         Sản phẩm
-
                         <select
                           value={cartProductId}
-                          onChange={e =>
-                            setCartProductId(e.target.value)
-                          }
+                          onChange={e => setCartProductId(e.target.value)}
                         >
                           <option value="">Chọn sản phẩm</option>
-
                           {products
                             .filter(product => product.isAvailable)
                             .map(product => (
-                              <option
-                                key={product.id}
-                                value={product.id}
-                              >
+                              <option key={product.id} value={product.id}>
                                 {product.name} — {money(product.price)}
                               </option>
                             ))}
@@ -1078,15 +1149,12 @@ export default function App() {
 
                       <label>
                         Số lượng
-
                         <input
                           type="number"
                           min="1"
                           step="1"
                           value={cartQuantity}
-                          onChange={e =>
-                            setCartQuantity(e.target.value)
-                          }
+                          onChange={e => setCartQuantity(e.target.value)}
                         />
                       </label>
 
@@ -1110,7 +1178,6 @@ export default function App() {
                             <th></th>
                           </tr>
                         </thead>
-
                         <tbody>
                           {cart.map(item => {
                             const product = products.find(
@@ -1119,20 +1186,12 @@ export default function App() {
 
                             return (
                               <tr key={item.productId}>
-                                <td>
-                                  {product?.name || `#${item.productId}`}
-                                </td>
-
+                                <td>{product?.name || `#${item.productId}`}</td>
                                 <td>{item.quantity}</td>
-
                                 <td>{money(product?.price || 0)}</td>
-
                                 <td className="price">
-                                  {money(
-                                    (product?.price || 0) * item.quantity
-                                  )}
+                                  {money((product?.price || 0) * item.quantity)}
                                 </td>
-
                                 <td>
                                   <button
                                     type="button"
@@ -1140,8 +1199,7 @@ export default function App() {
                                     onClick={() =>
                                       setCart(current =>
                                         current.filter(
-                                          x =>
-                                            x.productId !== item.productId
+                                          x => x.productId !== item.productId
                                         )
                                       )
                                     }
@@ -1152,7 +1210,6 @@ export default function App() {
                               </tr>
                             );
                           })}
-
                           {!cart.length && (
                             <EmptyRow
                               colSpan={5}
@@ -1164,10 +1221,7 @@ export default function App() {
                     </div>
 
                     <div className="cart-footer">
-                      <strong>
-                        Tạm tính: {money(cartTotal)}
-                      </strong>
-
+                      <strong>Tạm tính: {money(cartTotal)}</strong>
                       <button
                         type="button"
                         className="button primary"
@@ -1183,15 +1237,13 @@ export default function App() {
                     <div className="panel-heading">
                       <div>
                         <h3>Lịch sử đơn hàng</h3>
-                        <p>
-                          {orders.length} đơn hàng đã ghi nhận
-                        </p>
+                        <p>{orders.length} đơn hàng đã ghi nhận</p>
                       </div>
                     </div>
-
                     <OrderTable
                       orders={orders}
                       onUpdate={updateOrder}
+                      showFilters
                     />
                   </div>
                 </div>
@@ -1201,8 +1253,7 @@ export default function App() {
         </section>
 
         <footer className="footer">
-          BearCafe Management System · ASP.NET Core Web API ·
-          React + TypeScript · SQL Server
+          BearCafe Management System · ASP.NET Core Web API · React + TypeScript · SQL Server
         </footer>
       </main>
     </div>
@@ -1230,7 +1281,6 @@ function Stat({
         <span>{label}</span>
         <i>{icon}</i>
       </div>
-
       <strong>{value}</strong>
       <small>{note}</small>
     </div>
@@ -1264,6 +1314,7 @@ function EmptyRow({
 function OrderTable({
   orders,
   onUpdate,
+  showFilters = false,
 }: {
   orders: Order[];
   onUpdate: (
@@ -1271,7 +1322,61 @@ function OrderTable({
     status: string,
     paymentStatus: string
   ) => Promise<void>;
+  showFilters?: boolean;
 }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, paymentFilter, sortBy, pageSize]);
+
+  const filteredOrders = useMemo(() => {
+    const keyword = searchTerm.trim().toLocaleLowerCase();
+
+    return orders.filter(order => {
+      const matchesSearch =
+        !keyword ||
+        String(order.id).includes(keyword) ||
+        order.items?.some(item =>
+          item.productName.toLocaleLowerCase().includes(keyword)
+        );
+
+      const matchesStatus =
+        statusFilter === 'all' || order.status === statusFilter;
+      const matchesPayment =
+        paymentFilter === 'all' || order.paymentStatus === paymentFilter;
+
+      return matchesSearch && matchesStatus && matchesPayment;
+    });
+  }, [orders, searchTerm, statusFilter, paymentFilter]);
+
+  const sortedOrders = useMemo(() => {
+    return [...filteredOrders].sort((a, b) => {
+      switch (sortBy) {
+        case 'oldest':
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case 'amountHigh':
+          return b.totalAmount - a.totalAmount;
+        case 'amountLow':
+          return a.totalAmount - b.totalAmount;
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+  }, [filteredOrders, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedOrders = sortedOrders.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
   if (!orders.length) {
     return (
       <div className="empty">
@@ -1281,107 +1386,174 @@ function OrderTable({
   }
 
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Mã đơn</th>
-            <th>Thời gian</th>
-            <th>Sản phẩm</th>
-            <th>Tổng tiền</th>
-            <th>Trạng thái</th>
-            <th>Thanh toán</th>
-            <th>Cập nhật</th>
-          </tr>
-        </thead>
+    <div>
+      {showFilters && (
+        <div className="order-filters">
+          <input
+            type="search"
+            placeholder="Tìm theo mã đơn hoặc tên sản phẩm..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
 
-        <tbody>
-          {orders.map(order => (
-            <tr key={order.id}>
-              <td>
-                <strong>#{order.id}</strong>
-              </td>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            aria-label="Lọc trạng thái đơn hàng"
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="Pending">Pending</option>
+            <option value="Processing">Processing</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
 
-              <td>
-                {new Date(order.createdAt).toLocaleString('vi-VN')}
-              </td>
+          <select
+            value={paymentFilter}
+            onChange={e => setPaymentFilter(e.target.value)}
+            aria-label="Lọc trạng thái thanh toán"
+          >
+            <option value="all">Tất cả thanh toán</option>
+            <option value="Unpaid">Unpaid</option>
+            <option value="Paid">Paid</option>
+            <option value="Refunded">Refunded</option>
+          </select>
 
-              <td>
-                {order.items
-                  ?.map(
-                    item => `${item.productName} × ${item.quantity}`
-                  )
-                  .join(', ') || '—'}
-              </td>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            aria-label="Sắp xếp đơn hàng"
+          >
+            <option value="newest">Mới nhất</option>
+            <option value="oldest">Cũ nhất</option>
+            <option value="amountHigh">Giá trị cao nhất</option>
+            <option value="amountLow">Giá trị thấp nhất</option>
+          </select>
 
-              <td className="price">
-                {money(order.totalAmount)}
-              </td>
+          <select
+            value={pageSize}
+            onChange={e => setPageSize(Number(e.target.value))}
+            aria-label="Số đơn hàng mỗi trang"
+          >
+            <option value={5}>5 đơn / trang</option>
+            <option value={10}>10 đơn / trang</option>
+            <option value={20}>20 đơn / trang</option>
+          </select>
 
-              <td>
-                <span
-                  className={`pill ${
-                    order.status === 'Completed'
-                      ? 'green'
-                      : 'gray'
-                  }`}
-                >
-                  {order.status}
-                </span>
-              </td>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => {
+              setSearchTerm('');
+              setStatusFilter('all');
+              setPaymentFilter('all');
+              setSortBy('newest');
+              setPageSize(5);
+              setPage(1);
+            }}
+          >
+            Xóa bộ lọc
+          </button>
 
-              <td>
-                <span
-                  className={`pill ${
-                    order.paymentStatus === 'Paid'
-                      ? 'green'
-                      : 'amber'
-                  }`}
-                >
-                  {order.paymentStatus}
-                </span>
-              </td>
+          <span className="filter-result">
+            Hiển thị {filteredOrders.length} / {orders.length} đơn hàng
+          </span>
+        </div>
+      )}
 
-              <td>
-                <div className="order-edit">
-                  <select
-                    aria-label="Trạng thái đơn hàng"
-                    value={order.status}
-                    onChange={e =>
-                      void onUpdate(
-                        order,
-                        e.target.value,
-                        order.paymentStatus
-                      )
-                    }
-                  >
-                    <option value="Pending">Pending</option>
-                    <option value="Processing">Processing</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
-
-                  <select
-                    aria-label="Trạng thái thanh toán"
-                    value={order.paymentStatus}
-                    onChange={e =>
-                      void onUpdate(
-                        order,
-                        order.status,
-                        e.target.value
-                      )
-                    }
-                  >
-                    <option value="Unpaid">Unpaid</option>
-                    <option value="Paid">Paid</option>
-                    <option value="Refunded">Refunded</option>
-                  </select>
-                </div>
-              </td>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mã đơn</th>
+              <th>Thời gian</th>
+              <th>Sản phẩm</th>
+              <th>Tổng tiền</th>
+              <th>Trạng thái</th>
+              <th>Thanh toán</th>
+              <th>Cập nhật</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {paginatedOrders.map(order => (
+              <tr key={order.id}>
+                <td><strong>#{order.id}</strong></td>
+                <td>{new Date(order.createdAt).toLocaleString('vi-VN')}</td>
+                <td>
+                  {order.items
+                    ?.map(item => `${item.productName} × ${item.quantity}`)
+                    .join(', ') || '—'}
+                </td>
+                <td className="price">{money(order.totalAmount)}</td>
+                <td>
+                  <span className={`pill ${order.status === 'Completed' ? 'green' : 'gray'}`}>
+                    {order.status}
+                  </span>
+                </td>
+                <td>
+                  <span className={`pill ${order.paymentStatus === 'Paid' ? 'green' : 'amber'}`}>
+                    {order.paymentStatus}
+                  </span>
+                </td>
+                <td>
+                  <div className="order-edit">
+                    <select
+                      aria-label="Trạng thái đơn hàng"
+                      value={order.status}
+                      onChange={e =>
+                        void onUpdate(order, e.target.value, order.paymentStatus)
+                      }
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="Processing">Processing</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                    <select
+                      aria-label="Trạng thái thanh toán"
+                      value={order.paymentStatus}
+                      onChange={e =>
+                        void onUpdate(order, order.status, e.target.value)
+                      }
+                    >
+                      <option value="Unpaid">Unpaid</option>
+                      <option value="Paid">Paid</option>
+                      <option value="Refunded">Refunded</option>
+                    </select>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!paginatedOrders.length && (
+              <EmptyRow colSpan={7} text="Không tìm thấy đơn hàng phù hợp." />
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showFilters && (
+        <div className="pagination">
+          <span>Trang {currentPage}/{totalPages}</span>
+          <div className="pagination-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={currentPage === 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              ← Trước
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Sau →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1399,16 +1571,8 @@ function RevenuePanel({
   period: RevenuePeriod;
   onPeriodChange: (period: RevenuePeriod) => void;
 }) {
-  const maxAmount = Math.max(
-    10000,
-    ...data.map(item => item.amount)
-  );
-
-  const totalRevenue = data.reduce(
-    (sum, item) => sum + item.amount,
-    0
-  );
-
+  const maxAmount = Math.max(10000, ...data.map(item => item.amount));
+  const totalRevenue = data.reduce((sum, item) => sum + item.amount, 0);
   const labelInterval = data.length === 30 ? 5 : 1;
 
   return (
@@ -1418,7 +1582,6 @@ function RevenuePanel({
           <h3>Biểu đồ doanh thu</h3>
           <p>Doanh thu từ các đơn hàng đã thanh toán</p>
         </div>
-
         <select
           className="period-select"
           value={period}
@@ -1435,9 +1598,7 @@ function RevenuePanel({
 
       <div className="chart-total">
         <strong>{money(totalRevenue)}</strong>
-        <span>
-          Tổng doanh thu trong khoảng thời gian đã chọn
-        </span>
+        <span>Tổng doanh thu trong khoảng thời gian đã chọn</span>
       </div>
 
       <div className="revenue-chart">
@@ -1447,20 +1608,13 @@ function RevenuePanel({
           <span />
           <span />
         </div>
-
         <div className="revenue-columns">
           {data.map((item, index) => {
-            const height =
-              item.amount === 0
-                ? 2
-                : Math.max(
-                    5,
-                    (item.amount / maxAmount) * 100
-                  );
-
+            const height = item.amount === 0
+              ? 2
+              : Math.max(5, (item.amount / maxAmount) * 100);
             const showLabel =
-              index % labelInterval === 0 ||
-              index === data.length - 1;
+              index % labelInterval === 0 || index === data.length - 1;
 
             return (
               <div
@@ -1474,7 +1628,6 @@ function RevenuePanel({
                     style={{ height: `${height}%` }}
                   />
                 </div>
-
                 <span className="revenue-date">
                   {showLabel ? item.label : ''}
                 </span>
@@ -1496,32 +1649,12 @@ function RevenuePanel({
 // ORDER STATUS CHART
 // =============================================
 
-function OrderStatusPanel({
-  orders,
-}: {
-  orders: Order[];
-}) {
+function OrderStatusPanel({ orders }: { orders: Order[] }) {
   const statuses = [
-    {
-      key: 'Pending',
-      label: 'Chờ xử lý',
-      className: 'pending',
-    },
-    {
-      key: 'Processing',
-      label: 'Đang xử lý',
-      className: 'processing',
-    },
-    {
-      key: 'Completed',
-      label: 'Hoàn thành',
-      className: 'completed',
-    },
-    {
-      key: 'Cancelled',
-      label: 'Đã hủy',
-      className: 'cancelled',
-    },
+    { key: 'Pending', label: 'Chờ xử lý', className: 'pending' },
+    { key: 'Processing', label: 'Đang xử lý', className: 'processing' },
+    { key: 'Completed', label: 'Hoàn thành', className: 'completed' },
+    { key: 'Cancelled', label: 'Đã hủy', className: 'cancelled' },
   ];
 
   return (
@@ -1543,11 +1676,9 @@ function OrderStatusPanel({
           const count = orders.filter(
             order => order.status === status.key
           ).length;
-
-          const percentage =
-            orders.length > 0
-              ? (count / orders.length) * 100
-              : 0;
+          const percentage = orders.length > 0
+            ? (count / orders.length) * 100
+            : 0;
 
           return (
             <div className="status-item" key={status.key}>
@@ -1555,7 +1686,6 @@ function OrderStatusPanel({
                 <span>{status.label}</span>
                 <strong>{count}</strong>
               </div>
-
               <div className="status-bar-track">
                 <div
                   className={`status-bar-fill ${status.className}`}
