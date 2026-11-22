@@ -10,7 +10,7 @@ export interface OrderItem {
   unitPrice: number; subTotal: number;
 }
 export interface Order {
-  id: number; customerId: number | null; status: string; paymentStatus: string;
+  id: number; customerId: number | null; status: string; paymentStatus: string; paymentMethod: string | null;
   totalAmount: number; createdAt: string; items: OrderItem[];
 }
 export interface CreateOrderItem { productId: number; quantity: number; }

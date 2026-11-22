@@ -34,14 +34,28 @@ public class OrdersController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
-    [HttpPut("{id:int}/status")]
-    public async Task<IActionResult> UpdateStatus(int id, UpdateOrderStatusDto dto)
+
+[HttpPut("{id:int}/status")]
+public async Task<IActionResult> UpdateStatus(
+    int id,
+    UpdateOrderStatusDto dto)
+{
+    try
     {
-        try
-        {
-            var updated = await _service.UpdateStatusAsync(id, dto.Status, dto.PaymentStatus);
-            return updated ? NoContent() : NotFound(new { message = "Không tìm thấy đơn hàng." });
-        }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        var updated = await _service.UpdateStatusAsync(
+            id,
+            dto.Status,
+            dto.PaymentStatus,
+            dto.PaymentMethod
+        );
+
+        return updated
+            ? NoContent()
+            : NotFound(new { message = "Không tìm thấy đơn hàng." });
     }
+    catch (ArgumentException ex)
+    {
+        return BadRequest(new { message = ex.Message });
+    }
+}
 }

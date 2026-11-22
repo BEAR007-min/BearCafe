@@ -36,7 +36,15 @@ export const api = {
     list: () => request<Order[]>('/api/orders'),
     create: (data: { customerId: number | null; items: { productId: number; quantity: number }[] }) =>
       request<Order>('/api/orders', { method: 'POST', body: JSON.stringify(data) }),
-    updateStatus: (id: number, status: string, paymentStatus: string) =>
-      request<void>(`/api/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status, paymentStatus }) }),
+    updateStatus: (
+  id: number,
+  status: string,
+  paymentStatus: string,
+  paymentMethod: string | null
+) =>
+  request<void>(`/api/orders/${id}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, paymentStatus, paymentMethod })
+  }),
   },
 };

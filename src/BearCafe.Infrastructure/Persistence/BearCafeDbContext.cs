@@ -43,6 +43,7 @@ public class BearCafeDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Status).IsRequired().HasMaxLength(30);
             entity.Property(x => x.PaymentStatus).IsRequired().HasMaxLength(30);
+            entity.Property(x => x.PaymentMethod).HasMaxLength(30).IsRequired(false);
             entity.Property(x => x.TotalAmount).HasColumnType("decimal(18,2)");
             entity.Property(x => x.CreatedAt).HasColumnType("datetime2");
             entity.Property(x => x.CustomerId).IsRequired(false);

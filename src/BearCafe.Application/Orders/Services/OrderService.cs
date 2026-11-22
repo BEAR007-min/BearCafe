@@ -9,6 +9,7 @@ public class OrderService : IOrderService
 {
     private static readonly string[] OrderStatuses = ["Pending", "Processing", "Completed", "Cancelled"];
     private static readonly string[] PaymentStatuses = ["Unpaid", "Paid", "Refunded"];
+    private static readonly string[] PaymentMethods = ["Cash", "BankTransfer"];
     private readonly IOrderRepository _orders;
     private readonly IProductRepository _products;
 
@@ -67,29 +68,79 @@ public class OrderService : IOrderService
         return ToDto(saved);
     }
 
-    public async Task<bool> UpdateStatusAsync(int id, string status, string paymentStatus)
+    public async Task<bool> UpdateStatusAsync(
+    int id,
+    string status,
+    string paymentStatus,
+    string? paymentMethod)
+{
+    var order = await _orders.GetByIdAsync(id);
+
+    if (order is null)
+        return false;
+
+    if (!OrderStatuses.Contains(status, StringComparer.OrdinalIgnoreCase))
+        throw new ArgumentException(
+            "Status phải là Pending, Processing, Completed hoặc Cancelled.");
+
+    if (!PaymentStatuses.Contains(paymentStatus, StringComparer.OrdinalIgnoreCase))
+        throw new ArgumentException(
+            "PaymentStatus phải là Unpaid, Paid hoặc Refunded.");
+
+    var normalizedStatus = OrderStatuses.First(
+        x => x.Equals(status, StringComparison.OrdinalIgnoreCase));
+
+    var normalizedPaymentStatus = PaymentStatuses.First(
+        x => x.Equals(paymentStatus, StringComparison.OrdinalIgnoreCase));
+
+    if (normalizedPaymentStatus == "Paid")
     {
-        var order = await _orders.GetByIdAsync(id);
-        if (order is null) return false;
-        if (!OrderStatuses.Contains(status, StringComparer.OrdinalIgnoreCase))
-            throw new ArgumentException("Status phải là Pending, Processing, Completed hoặc Cancelled.");
-        if (!PaymentStatuses.Contains(paymentStatus, StringComparer.OrdinalIgnoreCase))
-            throw new ArgumentException("PaymentStatus phải là Unpaid, Paid hoặc Refunded.");
-        order.Status = OrderStatuses.First(x => x.Equals(status, StringComparison.OrdinalIgnoreCase));
-        order.PaymentStatus = PaymentStatuses.First(x => x.Equals(paymentStatus, StringComparison.OrdinalIgnoreCase));
-        await _orders.UpdateAsync(order);
-        return true;
+        if (string.IsNullOrWhiteSpace(paymentMethod))
+            throw new ArgumentException(
+                "Phải chọn phương thức thanh toán.");
+
+        if (!PaymentMethods.Contains(
+            paymentMethod.Trim(),
+            StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "PaymentMethod phải là Cash hoặc BankTransfer.");
+        }
+
+        order.PaymentMethod = PaymentMethods.First(
+            x => x.Equals(paymentMethod.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+    else if (normalizedPaymentStatus == "Unpaid")
+    {
+        order.PaymentMethod = null;
     }
 
+    order.Status = normalizedStatus;
+    order.PaymentStatus = normalizedPaymentStatus;
+
+    await _orders.UpdateAsync(order);
+
+    return true;
+}
+
     private static OrderDto ToDto(Order x) => new()
+{
+    Id = x.Id,
+    CustomerId = x.CustomerId,
+    Status = x.Status,
+    PaymentStatus = x.PaymentStatus,
+    PaymentMethod = x.PaymentMethod,
+    TotalAmount = x.TotalAmount,
+    CreatedAt = x.CreatedAt,
+
+    Items = x.OrderItems.Select(item => new OrderItemDto
     {
-        Id = x.Id, CustomerId = x.CustomerId, Status = x.Status,
-        PaymentStatus = x.PaymentStatus, TotalAmount = x.TotalAmount, CreatedAt = x.CreatedAt,
-        Items = x.OrderItems.Select(item => new OrderItemDto
-        {
-            Id = item.Id, ProductId = item.ProductId,
-            ProductName = item.Product?.Name ?? "Sản phẩm không xác định",
-            Quantity = item.Quantity, UnitPrice = item.UnitPrice, SubTotal = item.SubTotal
-        }).ToList()
-    };
+        Id = item.Id,
+        ProductId = item.ProductId,
+        ProductName = item.Product?.Name ?? "Sản phẩm không xác định",
+        Quantity = item.Quantity,
+        UnitPrice = item.UnitPrice,
+        SubTotal = item.SubTotal
+    }).ToList()
+};
 }

@@ -484,10 +484,16 @@ export default function App() {
   async function updateOrder(
     order: Order,
     status: string,
-    paymentStatus: string
+    paymentStatus: string,
+    paymentMethod: string | null = order.paymentMethod
   ) {
     await runAction(
-      () => api.orders.updateStatus(order.id, status, paymentStatus),
+      () => api.orders.updateStatus(
+        order.id,
+        status,
+        paymentStatus,
+        paymentMethod
+      ),
       `Đã cập nhật đơn hàng #${order.id}.`
     );
   }
@@ -1320,7 +1326,8 @@ function OrderTable({
   onUpdate: (
     order: Order,
     status: string,
-    paymentStatus: string
+    paymentStatus: string,
+    paymentMethod?: string | null
   ) => Promise<void>;
   showFilters?: boolean;
 }) {
@@ -1330,6 +1337,9 @@ function OrderTable({
   const [sortBy, setSortBy] = useState('newest');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
+  const [selectedInvoice, setSelectedInvoice] = useState<Order | null>(null);
+  const [paymentMethodDrafts, setPaymentMethodDrafts] =
+    useState<Record<number, string>>({});
 
   useEffect(() => {
     setPage(1);
@@ -1471,6 +1481,7 @@ function OrderTable({
               <th>Tổng tiền</th>
               <th>Trạng thái</th>
               <th>Thanh toán</th>
+              <th>Hóa đơn</th>
               <th>Cập nhật</th>
             </tr>
           </thead>
@@ -1496,7 +1507,17 @@ function OrderTable({
                   </span>
                 </td>
                 <td>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setSelectedInvoice(order)}
+                  >
+                    Xem hóa đơn
+                  </button>
+                </td>
+                <td>
                   <div className="order-edit">
+                    {/* Trạng thái đơn hàng */}
                     <select
                       aria-label="Trạng thái đơn hàng"
                       value={order.status}
@@ -1509,12 +1530,57 @@ function OrderTable({
                       <option value="Completed">Completed</option>
                       <option value="Cancelled">Cancelled</option>
                     </select>
+
+                    {/* Phương thức thanh toán */}
+                    <select
+                      aria-label="Phương thức thanh toán"
+                      value={
+                        paymentMethodDrafts[order.id] ??
+                        order.paymentMethod ??
+                        ''
+                      }
+                      disabled={order.paymentStatus !== 'Unpaid'}
+                      onChange={e =>
+                        setPaymentMethodDrafts(current => ({
+                          ...current,
+                          [order.id]: e.target.value
+                        }))
+                      }
+                    >
+                      <option value="">Chọn phương thức</option>
+                      <option value="Cash">Tiền mặt</option>
+                      <option value="BankTransfer">Chuyển khoản</option>
+                    </select>
+
+                    {/* Trạng thái thanh toán */}
                     <select
                       aria-label="Trạng thái thanh toán"
                       value={order.paymentStatus}
-                      onChange={e =>
-                        void onUpdate(order, order.status, e.target.value)
-                      }
+                      onChange={e => {
+                        const nextPaymentStatus = e.target.value;
+
+                        const selectedMethod =
+                          paymentMethodDrafts[order.id] ??
+                          order.paymentMethod ??
+                          '';
+
+                        if (nextPaymentStatus === 'Paid' && !selectedMethod) {
+                          window.alert('Vui lòng chọn phương thức thanh toán trước.');
+                          return;
+                        }
+
+                        const nextPaymentMethod =
+                          nextPaymentStatus === 'Unpaid'
+                            ? null
+                            : selectedMethod || null;
+
+                        void onUpdate(
+                          order,
+                          order.status,
+                          nextPaymentStatus,
+                          nextPaymentMethod
+                        );
+                      }}
                     >
                       <option value="Unpaid">Unpaid</option>
                       <option value="Paid">Paid</option>
@@ -1525,7 +1591,7 @@ function OrderTable({
               </tr>
             ))}
             {!paginatedOrders.length && (
-              <EmptyRow colSpan={7} text="Không tìm thấy đơn hàng phù hợp." />
+              <EmptyRow colSpan={8} text="Không tìm thấy đơn hàng phù hợp." />
             )}
           </tbody>
         </table>
@@ -1553,6 +1619,120 @@ function OrderTable({
             </button>
           </div>
         </div>
+      )}
+
+      {selectedInvoice && (
+  <div
+    className="invoice-overlay"
+    onClick={() => setSelectedInvoice(null)}
+  >
+    <section
+      className="invoice-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invoice-title"
+      onClick={event => event.stopPropagation()}
+    >
+      <div className="invoice-actions">
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => setSelectedInvoice(null)}
+        >
+          Đóng
+        </button>
+
+        <button
+          type="button"
+          className="button"
+          onClick={() => window.print()}
+        >
+          In hóa đơn
+        </button>
+      </div>
+
+      <div className="invoice-paper">
+        <header className="invoice-header">
+          <div className="invoice-brand">BearCafe</div>
+          <h2 id="invoice-title">HÓA ĐƠN BÁN HÀNG</h2>
+          <p>Cảm ơn quý khách đã sử dụng dịch vụ!</p>
+        </header>
+
+        <div className="invoice-info">
+          <p>
+            <strong>Mã hóa đơn:</strong> #{selectedInvoice.id}
+          </p>
+
+          <p>
+            <strong>Thời gian:</strong>{' '}
+            {new Date(selectedInvoice.createdAt).toLocaleString('vi-VN')}
+          </p>
+
+          <p>
+            <strong>Khách hàng:</strong>{' '}
+            {selectedInvoice.customerId == null
+              ? 'Khách lẻ'
+              : `Mã khách hàng #${selectedInvoice.customerId}`}
+          </p>
+
+          <p>
+            <strong>Trạng thái đơn hàng:</strong>{' '}
+            {selectedInvoice.status}
+          </p>
+
+          <p>
+            <strong>Thanh toán:</strong>{' '}
+            {selectedInvoice.paymentStatus === 'Paid'
+              ? 'Đã thanh toán'
+              : selectedInvoice.paymentStatus === 'Refunded'
+                ? 'Đã hoàn tiền'
+                : 'Chưa thanh toán'}
+          </p>
+
+          <p>
+            <strong>Phương thức:</strong>{' '}
+            {selectedInvoice.paymentMethod === 'Cash'
+              ? 'Tiền mặt'
+              : selectedInvoice.paymentMethod === 'BankTransfer'
+                ? 'Chuyển khoản'
+                : 'Chưa ghi nhận'}
+          </p>
+        </div>
+
+        <table className="invoice-items-table">
+          <thead>
+            <tr>
+              <th>Sản phẩm</th>
+              <th>SL</th>
+              <th>Đơn giá</th>
+              <th>Thành tiền</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {selectedInvoice.items.map(item => (
+              <tr key={item.id}>
+                <td>{item.productName}</td>
+                <td>{item.quantity}</td>
+                <td>{money(item.unitPrice)}</td>
+                <td>{money(item.subTotal)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="invoice-total">
+          <strong>TỔNG CỘNG</strong>
+          <strong>{money(selectedInvoice.totalAmount)}</strong>
+        </div>
+
+        <footer className="invoice-footer">
+          <p>Hẹn gặp lại quý khách!</p>
+          <small>BearCafe Management System</small>
+        </footer>
+      </div>
+    </section>
+  </div>
       )}
     </div>
   );
